@@ -9,7 +9,7 @@ arms only means something if it is larger than the second one.
 What a repeat is here: the same memory graph, every answer re-sampled. Nothing in the harness
 seeds the LLM -- `--seed` only permutes the order of the two options shown for category-5
 questions (`test_advanced_robust.py`, `random.Random(f"{seed}:...")`) -- so repeats differ by
-decoding alone, which is the variability a reader re-running the evaluation would see.
+both decoding and category-5 option order. Memory construction is held fixed; this does not measure full-pipeline variability.
 
 The graph is deliberately held fixed, because `--refresh-index` is *not* a "force rebuild" switch:
 it re-embeds neighbour notes the moment evolution rewrites them, where the paper's behaviour
@@ -21,7 +21,7 @@ changes the configuration. Measured, on these same 199 questions: F1 44.8 vs 41.
     python repro/variance.py runs/repB_k10_s1_* --only-sample 0 --markdown runs/tables/variance.md
 
 Reports, per category: the mean across runs, the *between-run* sd, min/max, and -- for contrast --
-the average within-run CI width. If the between-run sd is comparable to the CI, the honest
+the first repeat's within-run CI width. If the between-run sd is comparable to the CI, the honest
 conclusion is that the arm's number is quoted to more precision than the experiment earns.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ from repro.net import configure_network, quiet_redundant_downloads  # noqa: E402
 configure_network()
 quiet_redundant_downloads()
 
-from repro.score import CATEGORY_NAMES, bootstrap_ci, load_run, report, write_text  # noqa: E402
+from repro.score import CATEGORY_NAMES, bootstrap_ci, load_run, report, write_text, validate_runs  # noqa: E402
 
 ORDER = ["overall"] + list(CATEGORY_NAMES.values())
 
@@ -47,6 +47,7 @@ def spread(values: list[float]) -> dict:
     return {
         "mean": statistics.mean(values),
         "sd": statistics.stdev(values) if len(values) > 1 else 0.0,
+        "variance": statistics.variance(values) if len(values) > 1 else 0.0,
         "min": min(values),
         "max": max(values),
     }
@@ -57,6 +58,7 @@ def main() -> int:
     ap.add_argument("runs", nargs="+", help="run directories, one per repeat, same configuration")
     ap.add_argument("--only-sample", default=None,
                     help="restrict to one conversation (e.g. 0), for pairing with narrower arms")
+    ap.add_argument("--out", default=None, help="machine-readable repeat summary")
     ap.add_argument("--markdown", default=None)
     ap.add_argument("--tokens-md", default=None)
     ap.add_argument("--runs-md", default=None, help="one row per repeat, so every run shows")
@@ -64,10 +66,11 @@ def main() -> int:
 
     only = None if args.only_sample in (None, "all") else {int(args.only_sample)}
     loaded = [load_run(Path(d), only_sample=only) for d in args.runs]
+    validate_runs(loaded, repeat=True)
     reps = [report(r) for r in loaded]
 
     def category_values(key: str) -> list[float]:
-        """Per-question F1 for one category, from the first repeat -- only for the CI."""
+        """Per-question F1 for one category, from the first repeat -- only for its within-run CI."""
         return [s["f1_corrected"] for s in loaded[0]["scored"]
                 if key == "overall" or CATEGORY_NAMES.get(s["category"]) == key]
     if len(reps) < 2:
@@ -105,6 +108,14 @@ def main() -> int:
         lo, hi = m.get("ci95", (float("nan"), float("nan")))
         print(f"  {Path(d).name:<44} F1 {m['mean']:6.2f} [{lo:.2f}, {hi:.2f}]"
               f"  {r['tokens_per_question']['mean_prompt']:>9,.0f} tok/q")
+
+    if args.out:
+        import json
+        write_text(args.out, json.dumps({"runs": [r["arm"] for r in reps],
+            "repeat_scope": "fixed memory; decoding plus category-5 option order",
+            "categories": rows, "prompt_tokens": spread(tok),
+            "ci_scope": "question bootstrap on first listed repeat only",
+            "memory_cache_hash_verified": False}, indent=2))
 
     if args.runs_md:
         lines = ["| repeat | overall F1 | its own 95% CI | prompt tok/q | modelled $/q |",

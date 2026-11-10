@@ -23,8 +23,9 @@ Two claims are tested, in this order:
 1. **The scores themselves** on a fixed subset of LoCoMo, with the authors' pipeline and a
    different LLM (DeepSeek). Not expected to match: the paper's number is gpt-4o-mini's.
 2. **The cost claim** — A-Mem answers a question while reading `1,200–2,500` tokens of memory,
-   against ~`16,900` for full-context baselines. This one is largely model-independent, so it
-   is the claim a model swap can still speak to.
+   against ~`16,900` for full-context baselines. This is a descriptive comparison only:
+   model-generated notes, tokenizers, subset and accounting scope all differ, and no
+   same-condition full-context baseline was measured here.
 
 ## One modification
 
@@ -34,10 +35,11 @@ arms differ *only* in how many notes they read — the same notes, links and evo
 by the cache being loaded rather than rebuilt. Reported: F1, prompt tokens per question and
 $/question, paired per question, with a bootstrap CI on the difference.
 
-The knob is linear but five times larger than its name suggests: `find_related_memories_raw`
-appends up to `k` linked neighbours *for each* of the `k` retrieved notes, and each note carries
-~4.1 links, so context grows as `5.13·k` blocks — `k=10` sends 51.4 blocks (32.1 distinct).
-`repro/blocks.py` recounts this from a run log.
+In these runs the observed block count grows approximately linearly with k:
+`find_related_memories_raw` appends linked neighbours — the loop emits one more than `k`, so up
+to `k+1` — *for each* of the `k` retrieved notes, and each note carries ~4.1 links, so context
+grows as `5.13·k` blocks: `k=10` sends 51.4 blocks (32.1 distinct). `repro/blocks.py` recounts
+this from a run log.
 
 ## Deviations from the paper (all recorded in each run's `manifest.json`)
 
@@ -60,10 +62,11 @@ appends up to `k` linked neighbours *for each* of the `k` retrieved notes, and e
 | prompt tokens / question | **10,700** | **2,520** (claim: 85–93% below 16,910) |
 | cost, all three arms | **¥6.24** (balance delta) | — |
 
-The efficiency claim does not reproduce: `find_related_memories_raw` expands up to `k` neighbours
-for each of the `k` retrieved notes, so a question reads 51.4 note blocks (37.0% duplicate text),
-not 10. Sweeping `k` over {5, 10, 20} moves F1 by −1.90 / +2.50 points, both CIs containing zero,
-while tokens move 4×.
+This configuration did not reach the paper-reported token level. That does not by itself refute the
+paper's efficiency claim — tokenizers and note lengths differ — but the mechanism is visible in the
+code: `find_related_memories_raw` appends up to `k+1` neighbours *for each* of the `k` retrieved
+notes, so a question reads 51.4 note blocks (37.0% duplicate text), not 10. Sweeping `k` over
+{5, 10, 20} moves F1 by −1.90 / +2.50 points, both CIs containing zero, while tokens move 4×.
 
 ## Environment
 
@@ -106,27 +109,29 @@ can be recomputed from the stored predictions, with no API calls —
 python repro/score.py runs/main_k10_s2_deepseek-flash_seed42 \
                        runs/sweep5_k5_s1_deepseek-flash_seed42 \
                        runs/sweep20_k20_s1_deepseek-flash_seed42 \
-                       --only-sample 0 --markdown runs/tables/table-sweep.md \
+                       --compare --only-sample 0 --out runs/tables/sweep-score.json --markdown runs/tables/table-sweep.md \
                        --tokens-md runs/tables/table-sweep-tokens.md
 ```
 
 ## Run-to-run variance
 
 The harness does not seed the LLM: `--seed` only permutes the order of the two options shown for
-category-5 questions (`test_advanced_robust.py`). Every run is therefore a fresh sample at
-temperature 0.7, and "how far does F1 move if I run this again" is a real question the bootstrap
-CIs do not answer. Four evaluations of the reported configuration are committed — `runs/main_k10_s2_*`
-and `runs/repB_k10_s1_*` — and `repro/variance.py` reports mean, sd, range, and the within-run CI
-width beside them:
+category-5 questions (`test_advanced_robust.py`). Answers are re-sampled at temperature 0.7 (0.5
+for category 5) and the category-5 option order varies, so "how far does F1 move if I run this
+again" is a real question the bootstrap CIs do not answer. Four evaluations of the reported
+configuration are committed — `runs/main_k10_s2_*` and `runs/repB_k10_s1_*` — and
+`repro/variance.py` reports mean, sd, range, and the within-run CI width beside them:
 
 ```bash
 python repro/variance.py runs/repB_k10_s1_deepseek-flash_seed4* \
                          runs/main_k10_s2_deepseek-flash_seed42 --only-sample 0
 ```
 
-Result: overall F1 41.31 ± 1.13 (sd 1.13, range 2.61) against a within-run CI width of 11.1, and
-9,572 ± 16 prompt tokens per question. F1 differences of two or three points are inside that band;
-the token figures are not.
+Result: overall F1 41.31 ± 1.13 (sd 1.13, range 2.61) against a within-run CI width of 10.89
+(first listed repeat), and 9,572 ± 16 prompt tokens per question. This measures fixed-memory
+evaluation variability, not memory-construction variability. The k=5 and k=20 arms have one
+trial each, so their differences stay exploratory; a CI containing zero is not evidence of
+equivalent quality.
 
 `runs/rep_k10_s1_*` are three further repeats made with `--refresh-index`, which is **not** a
 "force rebuild" switch: it re-embeds neighbours as soon as evolution rewrites them, instead of
@@ -139,7 +144,7 @@ doubt the stored artefacts, which is the point of committing them.
 
 `run.py` refuses to run if the dataset SHA-256 changes, writes a manifest pinning the upstream
 commit, the prompt files' hashes, model, temperature, `k`, seed and package versions, and stops
-the moment spend crosses `--budget-usd`.
+after a recorded call takes the modelled spend across `--budget-usd`.
 
 ## Layout
 
@@ -158,3 +163,29 @@ repro/variance.py   mean / sd across repeated runs of one configuration
 Upstream files are unmodified except `memory_layer_robust.py` (+3 lines: `base_url` on the
 OpenAI controller, forwarded from the factory) so the harness can talk to any OpenAI-compatible
 endpoint.
+
+## Notes on reading these numbers
+
+- `--compare` aligns on conversation ID and exact question text; duplicate keys, different
+  question sets, references, models or evaluation configurations are rejected. Every
+  subsequent arm is compared against the first, and the differences and CIs are written to
+  `runs/tables/sweep-score.json`. These CIs resample questions, not repeated runs.
+- Repeats hold the memory fixed. The recorded cache-load flags support reuse, but the
+  historical manifests carry no cache-content hashes, so identical cache bytes cannot be
+  verified retrospectively. Refresh-index runs stay a separate group.
+- Quoted account-balance changes are aggregate observations I recorded, not per-arm bills;
+  token-based prices are estimates, not guaranteed upper bounds.
+- A deduplication change may reduce context, but its effect on answer quality is untested.
+- Every table regenerates without paid calls: the nine arms are committed, and the commands
+  above read only those artefacts.
+
+The four-run baseline summary, without any API calls:
+
+```bash
+python repro/variance.py runs/main_k10_s2_deepseek-flash_seed42 \
+                         runs/repB_k10_s1_deepseek-flash_seed46 \
+                         runs/repB_k10_s1_deepseek-flash_seed47 \
+                         runs/repB_k10_s1_deepseek-flash_seed48 \
+                         --only-sample 0 --out runs/tables/variance.json \
+                         --markdown runs/tables/variance.md --runs-md runs/tables/variance-runs.md
+```

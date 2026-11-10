@@ -132,6 +132,8 @@ def main() -> int:
     if data_file.name == "locomo10.json" and sha256(data_file) != EXPECTED_DATASET_SHA:
         raise SystemExit("dataset hash changed: refusing to compare arms across datasets")
 
+    if run_dir.exists():
+        raise SystemExit(f"run directory already exists: {run_dir}; choose a new --tag")
     telemetry.open_jsonl(run_dir / "telemetry_calls.jsonl")
     telemetry.LEDGER.budget_usd = args.budget_usd
     mlr, tar = telemetry.patch_harness()

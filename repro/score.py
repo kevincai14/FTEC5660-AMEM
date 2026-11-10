@@ -113,6 +113,61 @@ def load_run(run_dir: Path, only_sample=None) -> dict:
     return {"dir": run_dir, "manifest": manifest, "rows": rows, "scored": scored}
 
 
+def question_map(run):
+    """Align on conversation and exact question; reject ambiguous duplicate keys."""
+    result = {}
+    for row, scored in zip(run["rows"], run["scored"]):
+        key = (row["sample_id"], row["question"])
+        if key in result:
+            raise ValueError(f"duplicate question identity: {key}")
+        result[key] = (row, scored)
+    if not result:
+        raise ValueError("no questions selected")
+    return result
+
+
+def validate_runs(runs, repeat=False):
+    """Require comparable inputs; subset selection must be explicit."""
+    base = runs[0]["manifest"]
+    first = question_map(runs[0])
+    for run in runs:
+        m = run["manifest"]
+        if m.get("status") != "ok":
+            raise ValueError(f"incomplete run: {m['arm']}")
+        for field in ("model", "base_url", "prompts_sha256"):
+            if m.get(field) != base.get(field):
+                raise ValueError(f"incompatible {field}: {m['arm']}")
+        if m["dataset"]["sha256"] != base["dataset"]["sha256"]:
+            raise ValueError("dataset hash differs")
+        for field in ("memory_scope", "refresh_index", "temperature_c5", "embedding",
+                      "evo_threshold", "max_tokens_per_call") + (("retrieve_k",) if repeat else ()):
+            if m["params"].get(field) != base["params"].get(field):
+                raise ValueError(f"incompatible parameter {field}: {m['arm']}")
+        other = question_map(run)
+        if first.keys() != other.keys():
+            raise ValueError("question sets differ; select the common samples with --only-sample")
+        for key in first:
+            for field in ("category", "reference", "adversarial_answer"):
+                if first[key][0].get(field) != other[key][0].get(field):
+                    raise ValueError(f"reference/category differs: {key}")
+
+
+def paired_comparison(a, b):
+    left, right = question_map(a), question_map(b)
+    pairs = [(left[k][1], right[k][1]) for k in left]
+    diffs = [y["f1_corrected"] - x["f1_corrected"] for x, y in pairs]
+    tokens_a = statistics.mean(x["prompt_tokens"] for x, _ in pairs)
+    tokens_b = statistics.mean(y["prompt_tokens"] for _, y in pairs)
+    return {"baseline": a["manifest"]["arm"], "variant": b["manifest"]["arm"],
+            "n": len(pairs), "mean_delta_f1_points": statistics.mean(diffs) * 100,
+            "ci95_delta_f1_points": bootstrap_ci(diffs),
+            "wins": sum(d > 0 for d in diffs), "ties": sum(d == 0 for d in diffs),
+            "mean_prompt_tokens_baseline": tokens_a, "mean_prompt_tokens_variant": tokens_b,
+            "prompt_token_change_fraction": tokens_b / tokens_a - 1 if tokens_a else None,
+            "uncertainty": "paired question bootstrap; excludes run-to-run and memory-build variation",
+            "pairing": "sample_id + exact question text"}
+
+
 def aggregate(scored: list, key: str) -> dict:
     by_cat = defaultdict(list)
     for s in scored:
@@ -165,7 +220,7 @@ def report(run: dict) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+", help="run directories")
-    ap.add_argument("--compare", action="store_true", help="paired comparison between the first two runs")
+    ap.add_argument("--compare", action="store_true", help="compare every subsequent run against the first; validate question identities")
     ap.add_argument("--paper", action="store_true", help="show the paper's gpt-4o-mini A-Mem row next to ours")
     ap.add_argument("--markdown", default=None, help="write the per-category table as markdown")
     ap.add_argument("--tokens-md", default=None, help="write the token/cost table as markdown")
@@ -202,26 +257,25 @@ def main() -> int:
               f"prompt tokens/question: {rep['tokens_per_question']['mean_prompt']:.0f}")
         print(f"cost: ${rep['usage'].get('cost_usd', 0):.4f}  calls: {rep['usage'].get('calls', 0)}")
 
-    if args.compare and len(loaded) >= 2:
-        a, b = loaded[0], loaded[1]
-        paired = list(zip(a["scored"], b["scored"]))
-        if len(paired) != len(a["scored"]):
-            print("warning: arms have different question counts; comparing the overlapping prefix")
-        diffs = [(y["f1_corrected"] - x["f1_corrected"]) * 100 for x, y in paired]
-        lo, hi = bootstrap_ci([d / 100 for d in diffs])
-        print(f"\n=== paired F1(corrected): {a['manifest']['arm']} -> {b['manifest']['arm']} ===")
-        print(f"n={len(diffs)}  mean Δ={statistics.mean(diffs):+.2f}pp  "
-              f"95% CI [{lo:+.2f}, {hi:+.2f}]  wins {sum(d > 0 for d in diffs)}/{len(diffs)}")
-        tok_a = statistics.mean([s["prompt_tokens"] or 0 for s in a["scored"]])
-        tok_b = statistics.mean([s["prompt_tokens"] or 0 for s in b["scored"]])
-        print(f"prompt tokens/question: {tok_a:.0f} -> {tok_b:.0f} ({tok_b / tok_a - 1:+.1%})")
+    comparisons = []
+    if args.compare:
+        if len(loaded) < 2:
+            raise ValueError("--compare requires at least two runs")
+        validate_runs(loaded)
+        comparisons = [paired_comparison(loaded[0], b) for b in loaded[1:]]
+        for c in comparisons:
+            lo, hi = c["ci95_delta_f1_points"]
+            print(f"Paired {c['baseline']} -> {c['variant']}: n={c['n']}, "
+                  f"delta F1={c['mean_delta_f1_points']:+.2f}, CI [{lo:+.2f}, {hi:+.2f}]")
 
-    payload = {"arms": [{"dir": str(r["dir"].relative_to(ROOT)), **rep} for r, rep in zip(loaded, reports)]}
+    payload = {"arms": [{"dir": str(r["dir"].relative_to(ROOT)), **rep}
+                        for r, rep in zip(loaded, reports)], "comparisons": comparisons}
     if args.out:
         out_path = Path(args.out)
-    elif len(loaded) > 1:
+    elif len(loaded) > 1 or keep:
         # writing into the first run's directory would replace that arm's own score.json with
-        # a multi-arm payload -- a committed artefact silently overwritten by a read-only command
+        # a multi-arm payload, or with a subset of its own questions -- a committed artefact
+        # silently overwritten by a read-only command
         out_path = ROOT / "runs" / "tables" / "score.json"
     else:
         out_path = loaded[0]["dir"] / "score.json"
@@ -260,7 +314,7 @@ def main() -> int:
                 f"{(rep['cost_per_question'] or 0):.5f} | {u.get('cost_usd', 0):.3f} | "
                 f"{u.get('latency_s', 0) / 60:.0f} min | {'yes' if rep.get('peak') else 'no'} |")
         lines += ["", "Modelled at the published per-token prices. The account balance moved less than this",
-                  "model predicts (see README-REPRO.md): treat these as upper bounds."]
+                  "model predicts (see README-REPRO.md): these are estimates, not verified bills or guaranteed upper bounds. Whole-run totals include memory construction and all conversations; per-question columns use only the selected questions."]
         write_text(args.tokens_md, "\n".join(lines) + "\n")
         print(f"wrote {args.tokens_md}")
 

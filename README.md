@@ -1,5 +1,14 @@
 # Agentic Memory 🧠
 
+> **This fork is a reproducibility study (FTEC5660), not the authors' distribution.**
+> The evaluation below is run unchanged against DeepSeek instead of the OpenAI models, on a
+> fixed 2-conversation subset of LoCoMo, with one parameter changed (`retrieve_k`).
+> Everything needed to reproduce it — commands, manifests, deviations — is in
+> [`README-REPRO.md`](README-REPRO.md). The written analysis and the presentation are separate
+> deliverables and are deliberately not in this repository: this repo is code plus run artefacts.
+> Setup: `uv venv --python 3.12 .venv && uv pip install -r requirements-repro.lock.txt`,
+> then `python repro/run.py --dry-run --samples 2`.
+
 A novel agentic memory system for LLM agents that can dynamically organize memories in an agentic way.
 
 > **Note:** This repository is specifically designed to reproduce the results presented in our paper. If you want to use the A-Mem system in building your agents, please refer to our official implementation at: [A-mem-sys](https://github.com/WujiangXu/A-mem-sys)

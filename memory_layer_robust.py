@@ -95,7 +95,8 @@ class RobustBaseLLMController(ABC):
 
 
 class RobustOpenAIController(RobustBaseLLMController):
-    def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None):
+    def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None,
+                 base_url: Optional[str] = None):
         try:
             from openai import OpenAI
         except ImportError:
@@ -105,7 +106,9 @@ class RobustOpenAIController(RobustBaseLLMController):
             api_key = os.getenv('OPENAI_API_KEY')
         if api_key is None:
             raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
-        self.client = OpenAI(api_key=api_key)
+        # base_url lets the same harness talk to any OpenAI-compatible endpoint (DeepSeek here);
+        # left as None it is the OpenAI default, so the upstream run is unchanged.
+        self.client = OpenAI(api_key=api_key, base_url=base_url or None)
 
     @retry_llm_call(max_retries=2)
     def get_completion(self, prompt: str, temperature: float = 0.7) -> str:
@@ -252,7 +255,7 @@ class RobustLLMController:
                  sglang_port: int = 30000,
                  check_connection: bool = False):
         if backend == "openai":
-            self.llm = RobustOpenAIController(model, api_key)
+            self.llm = RobustOpenAIController(model, api_key, api_base)
         elif backend == "ollama":
             self.llm = RobustOllamaController(model)
         elif backend == "sglang":

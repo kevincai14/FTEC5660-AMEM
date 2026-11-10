@@ -1,0 +1,94 @@
+{
+  "arm": "main_k10_s2_deepseek-flash_seed42",
+  "status": "ok",
+  "error": null,
+  "started": "2026-11-10T15:06:27+08:00",
+  "elapsed_s": 3682.5,
+  "peak_start": true,
+  "model": "deepseek-flash",
+  "base_url": "https://api.deepseek.com",
+  "backend": "openai-compatible (upstream RobustOpenAIController)",
+  "dataset": {
+    "path": "data\\locomo10.json",
+    "sha256": "553cd5a15e25f2ceccc6ed185221eba645080c93e5b91087560a91aa5961f365",
+    "samples": 2,
+    "qa": 304,
+    "turns": 788,
+    "categories": {
+      "1": 43,
+      "2": 63,
+      "3": 13,
+      "4": 114,
+      "5": 71
+    }
+  },
+  "params": {
+    "retrieve_k": 10,
+    "seed": 42,
+    "temperature_c5": 0.5,
+    "memory_scope": "conversation",
+    "refresh_index": false,
+    "evo_threshold": 100,
+    "max_tokens_per_call": 1000,
+    "embedding": "all-MiniLM-L6-v2"
+  },
+  "prompts_sha256": {
+    "llm_text_parsers.py": "44f661c5ca2879a6daa571d5559741251d26c9dc9dfd9fa70c8a25411782f588",
+    "memory_layer_robust.py": "65c4eee680ce0a83c56ef325fdeda21c8297df414c486df9f1358916791bf30e",
+    "test_advanced_robust.py": "cc549fe0c547363a89ce5d44bdf10ee4885a898630c0093c67ec1bbb89a9dffa",
+    "utils.py": "d1525c05dba67f7e213e71470dbd15ec5de88a390f17031c045e6485b4c5eab5"
+  },
+  "upstream": {
+    "base_commit": "f9a173dec325d84fcc97e7828775c7b241c33466",
+    "base_subject": "README: announce FlexA-Mem and cite the series papers",
+    "head": "d765e08dd86f15a71d4fa3b26d9a0d726aa264e3",
+    "head_subject": "repro: allow a smaller dataset for wiring tests; record upstream base commit",
+    "dirty": true
+  },
+  "environment": {
+    "python": "3.12.14",
+    "packages": {
+      "torch": "2.15.0",
+      "transformers": "5.22.2",
+      "sentence-transformers": "6.2.0",
+      "openai": "3.48.0"
+    },
+    "network": {
+      "HTTP_PROXY": "cleared",
+      "HTTPS_PROXY": "cleared",
+      "HF_ENDPOINT": "https://hf-mirror.com",
+      "NLTK_DATA": "C:\\Users\\Quan\\Documents\\GitHub\\FTEC5660-AMEM\\.nltk_data"
+    },
+    "nltk": {
+      "punkt": true,
+      "punkt_tab": true,
+      "wordnet": true
+    },
+    "bert_score": "disabled (stubbed to 0; appendix metric, roberta-large skipped)"
+  },
+  "usage": {
+    "calls": 3038,
+    "prompt_tokens": 5283142,
+    "completion_tokens": 193215,
+    "cache_hit_tokens": 194048,
+    "cache_miss_tokens": 5089094,
+    "latency_s": 3608.0,
+    "cost_usd": 1.75975,
+    "cost_cny": 12.5822,
+    "by_stage": {
+      "memory": {
+        "calls": 2430,
+        "prompt": 2030183,
+        "completion": 187122,
+        "cost_usd": 0.833601
+      },
+      "qa": {
+        "calls": 608,
+        "prompt": 3252959,
+        "completion": 6093,
+        "cost_usd": 0.926149
+      }
+    }
+  },
+  "budget_usd": 1.8
+}

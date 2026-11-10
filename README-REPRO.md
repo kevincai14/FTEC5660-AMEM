@@ -209,3 +209,20 @@ python repro/variance.py runs/main_k10_s2_deepseek-flash_seed42 \
                          --only-sample 0 --out runs/tables/variance.json \
                          --markdown runs/tables/variance.md --runs-md runs/tables/variance-runs.md
 ```
+
+## Historical-loop replay evidence
+
+The committed [diagnostic results](diagnostics/history-replay.json) and
+[replay instructions](diagnostics/README.md) quantify expansion changes across
+85787ea, 3542c98 and 5b345e6. On fixed current notes and actual direct retrievals,
+context tokens increase 2.15x from the earliest to the current loop on conv-26.
+This does not establish which code generated the paper's numbers or isolate all
+cross-model differences. No additional LLM call is needed for this diagnostic.
+
+```bash
+python repro/replay_history.py --verify-json diagnostics/history-replay.json
+```
+
+This fresh-clone check verifies summary arithmetic. Full replay additionally requires
+the original ignored logs and memory caches, plus tiktoken and upstream Git history;
+see diagnostics/README.md. The first tokenizer download is a public static asset.

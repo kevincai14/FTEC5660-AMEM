@@ -7,6 +7,10 @@ the reader rather than taken on trust. Two modes:
     python repro/blocks.py --prompt path/to/one_prompt.txt      # a saved prompt
     python repro/blocks.py --log logs/eval_..._conversation.log # every prompt in a run
 
+Run logs are large (27 MB for the 304-question arm) and are not committed, so each arm stores the
+counting for every question in `runs/<arm>/blocks.json`; those rows are what the means printed
+below are computed from, and `--json` regenerates the file.
+
 A *block* is one `talk start time:` segment, which `find_related_memories_raw` emits per
 note: the retrieved note itself plus one per expanded link. Two blocks are the same note if
 their text is identical, which is what makes the duplicate share meaningful.
@@ -15,6 +19,7 @@ their text is identical, which is what makes the duplicate share meaningful.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import statistics
 import sys
@@ -46,7 +51,7 @@ def note_key(block: str) -> str:
 
 
 def stats(prompts: list[str]) -> dict:
-    rows = []
+    rows: list[dict] = []
     for prompt in prompts:
         blocks = blocks_in(prompt)
         if not blocks:
@@ -64,6 +69,7 @@ def stats(prompts: list[str]) -> dict:
     if not rows:
         return {}
     return {
+        "per_question": rows,
         "questions": len(rows),
         "blocks": statistics.mean(r["blocks"] for r in rows),
         "distinct": statistics.mean(r["distinct"] for r in rows),
@@ -111,14 +117,24 @@ def main() -> None:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--prompt", type=Path, help="a saved prompt: one User Prompt block from a run log")
     g.add_argument("--log", type=Path, help="a run log; every User Prompt in it is counted")
+    ap.add_argument("--json", type=Path, default=None,
+                    help="also write the per-question counts, so the mean can be re-derived later")
     args = ap.parse_args()
 
     if args.prompt:
         text = args.prompt.read_text(encoding="utf-8")
-        report(str(args.prompt), stats([text]))
+        source, s = str(args.prompt), stats([text])
     else:
-        prompts = from_log(args.log)
-        report(str(args.log), stats(prompts))
+        source, s = str(args.log), stats(from_log(args.log))
+
+    report(source, s)
+
+    if args.json:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"source": Path(source).name, **{k: v for k, v in s.items() if k != "per_question"},
+                   "per_question": s["per_question"]}
+        args.json.write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
+        print(f"  wrote {args.json}")
 
 
 if __name__ == "__main__":

@@ -38,8 +38,19 @@ $/question, paired per question, with a bootstrap CI on the difference.
 In these runs the observed block count grows approximately linearly with k:
 `find_related_memories_raw` appends linked neighbours — the loop emits one more than `k`, so up
 to `k+1` — *for each* of the `k` retrieved notes, and each note carries ~4.1 links, so context
-grows as `5.13·k` blocks: `k=10` sends 51.4 blocks (32.1 distinct). `repro/blocks.py` recounts
-this from a run log.
+grows as `5.13·k` blocks: `k=10` sends 51.4 blocks (32.1 distinct, 37.0% duplicate text).
+
+`repro/blocks.py` recounts that. Run logs are ~27 MB per arm and are not committed, so each arm
+carries its per-question counts instead — `runs/<arm>/blocks.json`, one row per question, which
+is what the means come from (25.7 / 51.4 / 102.1 blocks at `k` = 5 / 10 / 20, i.e. 5.15 / 5.14 /
+5.11 blocks per unit of `k`). `repro/samples/prompt-example.txt` is one real prompt from the
+reported arm, the median case (51 blocks, 35 distinct), so the counting rule can be inspected
+by hand:
+
+```bash
+python repro/blocks.py --prompt repro/samples/prompt-example.txt      # 51 blocks, 35 distinct
+python repro/blocks.py --log logs/<arm>.log --json runs/<arm>/blocks.json
+```
 
 ## Deviations from the paper (all recorded in each run's `manifest.json`)
 
@@ -80,6 +91,13 @@ uv pip install --python .venv/Scripts/python.exe -r requirements-repro.lock.txt 
 python repro/fetch_nltk.py        # tokenizer + wordnet into .nltk_data/, and verifies them
 ```
 
+Behind a proxy, NLTK 3.10 blocks the download (`Security Violation [pathsec.urlopen]`) and
+`fetch_nltk.py` exits non-zero rather than leaving a BLEU of 0.00 behind — re-run it as
+
+```bash
+NLTK_ALLOW_PROXIED_URLOPEN=1 AMEM_KEEP_PROXY=1 python repro/fetch_nltk.py
+```
+
 Two host fixes, applied by `repro/net.py` before any model import:
 
 - HuggingFace goes through `hf-mirror.com` (direct huggingface.co returns 502 here) unless
@@ -111,6 +129,7 @@ python repro/score.py runs/main_k10_s2_deepseek-flash_seed42 \
                        runs/sweep20_k20_s1_deepseek-flash_seed42 \
                        --compare --only-sample 0 --out runs/tables/sweep-score.json --markdown runs/tables/table-sweep.md \
                        --tokens-md runs/tables/table-sweep-tokens.md
+python repro/blocks.py --prompt repro/samples/prompt-example.txt   # the 51-block context, by hand
 ```
 
 ## Run-to-run variance
@@ -158,6 +177,7 @@ repro/smoke.py      unit-cost probe
 repro/score.py      F1/BLEU under both c5 conventions, bootstrap CI, paired comparison
 repro/blocks.py     counts note blocks per prompt (the 5.13·k measurement)
 repro/variance.py   mean / sd across repeated runs of one configuration
+repro/samples/      one saved prompt, so blocks.py runs without a 27 MB log
 ```
 
 Upstream files are unmodified except `memory_layer_robust.py` (+3 lines: `base_url` on the

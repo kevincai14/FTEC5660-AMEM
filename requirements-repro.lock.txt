@@ -1,0 +1,16 @@
+# generated 2026-11-10 on Windows, CPython 3.12.14 (uv pip freeze subset)
+
+numpy==2.5.4
+sentence-transformers==6.2.0
+scikit-learn==1.9.1
+torch==2.15.0
+transformers==5.22.2
+nltk==3.10.4
+rank-bm25==0.2.2
+openai==3.48.0
+litellm==1.108.4
+rouge-score==0.1.2
+bert-score==0.3.13
+tqdm==4.70.1
+pandas==3.1.1
+python-dotenv==1.2.4
